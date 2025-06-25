@@ -1,0 +1,5 @@
+{
+  "cmake.configureSettings": {
+    "PICO_SDK_PATH": "D:/DevelopeTool/Raspberry Pi/Pico SDK v1.5.1/pico-sdk"
+  }
+}

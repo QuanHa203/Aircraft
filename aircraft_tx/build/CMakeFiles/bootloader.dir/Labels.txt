@@ -1,0 +1,13 @@
+# Target labels
+ bootloader
+# Source files and their labels
+D:/WorkSpace/Projects/Aircraft/aircraft_tx/build/CMakeFiles/bootloader
+D:/WorkSpace/Projects/Aircraft/aircraft_tx/build/CMakeFiles/bootloader.rule
+D:/WorkSpace/Projects/Aircraft/aircraft_tx/build/CMakeFiles/bootloader-complete.rule
+D:/WorkSpace/Projects/Aircraft/aircraft_tx/build/bootloader-prefix/src/bootloader-stamp/bootloader-build.rule
+D:/WorkSpace/Projects/Aircraft/aircraft_tx/build/bootloader-prefix/src/bootloader-stamp/bootloader-configure.rule
+D:/WorkSpace/Projects/Aircraft/aircraft_tx/build/bootloader-prefix/src/bootloader-stamp/bootloader-download.rule
+D:/WorkSpace/Projects/Aircraft/aircraft_tx/build/bootloader-prefix/src/bootloader-stamp/bootloader-install.rule
+D:/WorkSpace/Projects/Aircraft/aircraft_tx/build/bootloader-prefix/src/bootloader-stamp/bootloader-mkdir.rule
+D:/WorkSpace/Projects/Aircraft/aircraft_tx/build/bootloader-prefix/src/bootloader-stamp/bootloader-patch.rule
+D:/WorkSpace/Projects/Aircraft/aircraft_tx/build/bootloader-prefix/src/bootloader-stamp/bootloader-update.rule
