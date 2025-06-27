@@ -12,7 +12,8 @@
 
 #define TAG "soft_access_point"
 
-void wifi_nvs_flash_init()
+
+void aircraft_lib::wifi_nvs_flash_init()
 {
     esp_err_t ret = nvs_flash_init();
     if (ret == ESP_ERR_NVS_NO_FREE_PAGES || ret == ESP_ERR_NVS_NEW_VERSION_FOUND)
@@ -25,7 +26,7 @@ void wifi_nvs_flash_init()
     ESP_LOGI(TAG, "ESP_WIFI_MODE_AP");
 }
 
-void wifi_init_softap(const char *ssid, const char *pass, uint8_t channel = 1, uint8_t max_conn = 1)
+void aircraft_lib::wifi_init_softap(const char *ssid, const char *pass, uint8_t channel, uint8_t max_conn)
 {
     ESP_ERROR_CHECK(esp_netif_init());
     ESP_ERROR_CHECK(esp_event_loop_create_default());
