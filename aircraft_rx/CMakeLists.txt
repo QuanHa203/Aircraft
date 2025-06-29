@@ -1,10 +1,13 @@
 cmake_minimum_required(VERSION 3.13)
-project(aircraft_rx C CXX ASM)
 
-include(${PICO_SDK_PATH}/external/pico_sdk_import.cmake)
+include(pico_sdk_import.cmake)
+
+project(aircraft_rx C CXX ASM)
 pico_sdk_init()
 
-add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/../shared_lib shared_lib_build)
+add_subdirectory(components/drv8833)
+add_subdirectory(components/nrf24l01)
+add_subdirectory(components/servo)
 
 add_executable(aircraft_rx
     main/main.cpp
@@ -12,7 +15,8 @@ add_executable(aircraft_rx
 
 target_link_libraries(aircraft_rx
     pico_stdlib
-    shared_lib
+    hardware_spi
+    nrf24l01
 )
 
 pico_add_extra_outputs(aircraft_rx)

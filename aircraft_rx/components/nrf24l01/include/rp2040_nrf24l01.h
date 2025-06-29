@@ -1,22 +1,16 @@
-#ifndef ESP32_NRF24L01_H
-#define ESP32_NRF24L01_H
+#ifndef RP2040_NRF24L01_H
+#define RP2040_NRF24L01_H
 
 #include "nrf24l01_interface.h"
 
-#include "driver/gpio.h"
-#include "driver/spi_master.h"
-
-#include "freertos/FreeRTOS.h"
-
-#include "esp_rom_sys.h"
-#include "esp_log.h"
-
+#include "cstdio"
+#include "pico/stdlib.h"
+#include "hardware/spi.h"
 #include "string.h"
 
 namespace aircraft_lib
 {
-
-    class Esp32Nrf24l01 : public INrf24l01
+    class RP2040Nrf24l01 : public INrf24l01
     {
     private:
         // SPI command
@@ -62,8 +56,9 @@ namespace aircraft_lib
         const uint8_t NRF24L01_STATUS_TX_DS = (1 << 5);
         const uint8_t NRF24L01_STATUS_RX_DR = (1 << 6);
 
-        gpio_num_t ce_pin_, csn_pin_, irq_pin_, sck_pin_, mosi_pin_, miso_pin_;
-        static spi_device_handle_t nrf24l01_spi_;
+        spi_inst_t* spi_port_;
+        uint8_t ce_pin_, csn_pin_, irq_pin_, sck_pin_, mosi_pin_, miso_pin_;
+
 
         uint8_t read_register(uint8_t reg) override;
         void write_register(uint8_t reg, uint8_t data) override;
@@ -86,7 +81,7 @@ namespace aircraft_lib
         void clear_interrupt_flags() override;
 
     public:
-        Esp32Nrf24l01(gpio_num_t ce_pin, gpio_num_t csn_pin, gpio_num_t irq_pin, gpio_num_t sck_pin, gpio_num_t mosi_pin, gpio_num_t miso_pin);
+        RP2040Nrf24l01(spi_inst_t* spi_port, uint8_t ce_pin, uint8_t csn_pin, uint8_t irq_pin, uint8_t sck_pin, uint8_t mosi_pin, uint8_t miso_pin);
 
         void init() override;
 
@@ -101,4 +96,5 @@ namespace aircraft_lib
         void print_register_map() override;
     };
 }
+
 #endif

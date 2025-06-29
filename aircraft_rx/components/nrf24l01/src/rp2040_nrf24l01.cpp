@@ -1,104 +1,63 @@
-#include "esp32_nrf24l01.h"
+#include "rp2040_nrf24l01.h"
 
 namespace aircraft_lib
 {
-    // Static field
-    spi_device_handle_t Esp32Nrf24l01::nrf24l01_spi_ = nullptr;
-
     // Contructor
-    Esp32Nrf24l01::Esp32Nrf24l01(gpio_num_t ce_pin, gpio_num_t csn_pin, gpio_num_t irq_pin, gpio_num_t sck_pin, gpio_num_t mosi_pin, gpio_num_t miso_pin)
-        : ce_pin_(ce_pin), csn_pin_(csn_pin), irq_pin_(irq_pin), sck_pin_(sck_pin), mosi_pin_(mosi_pin), miso_pin_(miso_pin) {}
+    RP2040Nrf24l01::RP2040Nrf24l01(spi_inst_t* spi_port, uint8_t ce_pin, uint8_t csn_pin, uint8_t irq_pin, uint8_t sck_pin, uint8_t mosi_pin, uint8_t miso_pin)
+        : spi_port_(spi_port), ce_pin_(ce_pin), csn_pin_(csn_pin), irq_pin_(irq_pin), sck_pin_(sck_pin), mosi_pin_(mosi_pin), miso_pin_(miso_pin) {}
 
     // Private method
-    uint8_t Esp32Nrf24l01::read_register(uint8_t reg)
+    uint8_t RP2040Nrf24l01::read_register(uint8_t reg)
     {
         uint8_t cmd = NRF24L01_CMD_R_REGISTER | (reg & 0x1F);
         uint8_t tx_buf[2] = {cmd, NRF24L01_CMD_NOP};
         uint8_t rx_buf[2];
 
-        spi_transaction_t t;
-        memset(&t, 0, sizeof(t));
-        t.length = 16;
-        t.tx_buffer = tx_buf;
-        t.rx_buffer = rx_buf;
-
         set_csn_pin_low();
-        esp_err_t ret = spi_device_transmit(nrf24l01_spi_, &t);
-        if (ret != ESP_OK)
-            ESP_LOGE("NRF24", "SPI transmit failed: %s", esp_err_to_name(ret));
-
+        spi_write_read_blocking(spi_port_, tx_buf, rx_buf, 2);
         set_csn_pin_high();
-
         return rx_buf[1];
     }
 
-    void Esp32Nrf24l01::write_register(uint8_t reg, uint8_t data)
+    void RP2040Nrf24l01::write_register(uint8_t reg, uint8_t data)
     {
         uint8_t cmd = NRF24L01_CMD_W_REGISTER | (reg & 0x1F);
         uint8_t tx_buf[2] = {cmd, data};
-
-        spi_transaction_t t;
-        memset(&t, 0, sizeof(t));
-        t.length = 16;
-        t.tx_buffer = tx_buf;
-        t.rx_buffer = NULL;
-
+     
         set_csn_pin_low();
-        esp_err_t ret = spi_device_transmit(nrf24l01_spi_, &t);
-        if (ret != ESP_OK)
-            ESP_LOGE("NRF24", "SPI transmit failed: %s", esp_err_to_name(ret));
-
+        spi_write_blocking(spi_port_, tx_buf, 2);
         set_csn_pin_high();
     }
 
-    void Esp32Nrf24l01::read_register_multi(uint8_t reg, uint8_t *data, size_t len)
+    void RP2040Nrf24l01::read_register_multi(uint8_t reg, uint8_t *data, size_t len)
     {
         if (len > 31)
             return;
 
         uint8_t cmd = NRF24L01_CMD_R_REGISTER | (reg & 0x1F);
-        uint8_t tx[1 + len];
-        uint8_t rx[1 + len];
-        memset(tx, NRF24L01_CMD_NOP, sizeof(tx));
-        tx[0] = cmd;
-
-        spi_transaction_t t;
-        memset(&t, 0, sizeof(t));
-        t.length = (1 + len) * 8,
-        t.tx_buffer = tx;
-        t.rx_buffer = rx;
+        uint8_t tx_buf[1 + len];
+        uint8_t rx_buf[1 + len];
+        memset(tx_buf, NRF24L01_CMD_NOP, sizeof(tx_buf));
+        tx_buf[0] = cmd;
 
         set_csn_pin_low();
-        esp_err_t ret = spi_device_transmit(nrf24l01_spi_, &t);
-        if (ret != ESP_OK)
-            ESP_LOGE("NRF24", "SPI transmit failed: %s", esp_err_to_name(ret));
-
+        spi_write_read_blocking(spi_port_, tx_buf, rx_buf, len + 1);
         set_csn_pin_high();
-
-        memcpy(data, &rx[1], len);
+        memcpy(data, &rx_buf[1], len);  // Bỏ byte đầu (status)
     }
-    void Esp32Nrf24l01::write_register_multi(uint8_t reg, uint8_t *data, size_t len)
+    void RP2040Nrf24l01::write_register_multi(uint8_t reg, uint8_t *data, size_t len)
     {
         uint8_t cmd = NRF24L01_CMD_W_REGISTER | (reg & 0x1F);
         uint8_t tx_buf[1 + len];
         tx_buf[0] = cmd;
         memcpy(&tx_buf[1], data, len);
 
-        spi_transaction_t t;
-        memset(&t, 0, sizeof(t));
-        t.length = (1 + len) * 8;
-        t.tx_buffer = tx_buf;
-        t.rx_buffer = NULL;
-
         set_csn_pin_low();
-        esp_err_t ret = spi_device_transmit(nrf24l01_spi_, &t);
-        if (ret != ESP_OK)
-            ESP_LOGE("NRF24", "SPI transmit failed: %s", esp_err_to_name(ret));
-
+        spi_write_blocking(spi_port_, tx_buf, len + 1);
         set_csn_pin_high();
     }
 
-    void Esp32Nrf24l01::read_payload(uint8_t *data, size_t len)
+    void RP2040Nrf24l01::read_payload(uint8_t *data, size_t len)
     {
         if (len > 32)
             len = 32;
@@ -109,23 +68,14 @@ namespace aircraft_lib
         tx_buf[0] = NRF24L01_CMD_R_RX_PAYLOAD;
         memset(&tx_buf[1], NRF24L01_CMD_NOP, len);
 
-        spi_transaction_t t;
-        memset(&t, 0, sizeof(t));
-        t.length = (1 + len) * 8;
-        t.tx_buffer = tx_buf;
-        t.rx_buffer = rx_buf;
-
         set_csn_pin_low();
-        esp_err_t ret = spi_device_transmit(nrf24l01_spi_, &t);
-        if (ret != ESP_OK)
-            ESP_LOGE("NRF24", "SPI transmit failed: %s", esp_err_to_name(ret));
-
+        spi_write_read_blocking(spi_port_, tx_buf, rx_buf, len + 1);
         set_csn_pin_high();
 
-        memcpy(data, &rx_buf[1], len);
+        memcpy(data, &rx_buf[1], len);  // // Bỏ byte đầu (status)
     }
 
-    void Esp32Nrf24l01::write_payload(uint8_t *data, size_t len)
+    void RP2040Nrf24l01::write_payload(uint8_t *data, size_t len)
     {
         if (len > 32)
             len = 32;
@@ -134,139 +84,88 @@ namespace aircraft_lib
         tx_buf[0] = NRF24L01_CMD_W_TX_PAYLOAD;
         memcpy(&tx_buf[1], data, len);
 
-        spi_transaction_t t;
-        memset(&t, 0, sizeof(t));
-        t.length = (1 + len) * 8;
-        t.tx_buffer = tx_buf;
-        t.rx_buffer = NULL;
-
         set_csn_pin_low();
-        esp_err_t ret = spi_device_transmit(nrf24l01_spi_, &t);
-        if (ret != ESP_OK)
-            ESP_LOGE("NRF24", "SPI transmit failed: %s", esp_err_to_name(ret));
-
+        spi_write_blocking(spi_port_, tx_buf, len + 1);
         set_csn_pin_high();
     }
 
-    void Esp32Nrf24l01::flush_tx()
+    void RP2040Nrf24l01::flush_tx()
     {
         uint8_t cmd = NRF24L01_CMD_FLUSH_TX;
-        spi_transaction_t t;
-        memset(&t, 0, sizeof(t));
-        t.length = 8;
-        t.tx_buffer = &cmd;
-        t.rx_buffer = NULL;
 
         set_csn_pin_low();
-        esp_err_t ret = spi_device_transmit(nrf24l01_spi_, &t);
-        if (ret != ESP_OK)
-            ESP_LOGE("NRF24", "SPI transmit failed: %s", esp_err_to_name(ret));
-
+        spi_write_blocking(spi_port_, &cmd, 1);
         set_csn_pin_high();
     }
 
-    void Esp32Nrf24l01::flush_rx()
+    void RP2040Nrf24l01::flush_rx()
     {
         uint8_t cmd = NRF24L01_CMD_FLUSH_RX;
-        spi_transaction_t t;
-        memset(&t, 0, sizeof(t));
-        t.length = 8;
-        t.tx_buffer = &cmd;
-
+        
         set_csn_pin_low();
-        esp_err_t ret = spi_device_transmit(nrf24l01_spi_, &t);
-        if (ret != ESP_OK)
-            ESP_LOGE("NRF24", "SPI transmit failed: %s", esp_err_to_name(ret));
-
+        spi_write_blocking(spi_port_, &cmd, 1);
         set_csn_pin_high();
     }
 
-    void Esp32Nrf24l01::set_ce_pin_high()
+    void RP2040Nrf24l01::set_ce_pin_high()
     {
-        gpio_set_level(ce_pin_, 1);
+        gpio_put(ce_pin_, 1);
     }
 
-    void Esp32Nrf24l01::set_ce_pin_low()
+    void RP2040Nrf24l01::set_ce_pin_low()
     {
-        gpio_set_level(ce_pin_, 0);
+        gpio_put(ce_pin_, 0);
     }
 
-    void Esp32Nrf24l01::set_csn_pin_high()
+    void RP2040Nrf24l01::set_csn_pin_high()
     {
-        gpio_set_level(csn_pin_, 1);
+        gpio_put(csn_pin_, 1);
     }
 
-    void Esp32Nrf24l01::set_csn_pin_low()
+    void RP2040Nrf24l01::set_csn_pin_low()
     {
-        gpio_set_level(csn_pin_, 0);
+        gpio_put(csn_pin_, 0);
     }
 
-    void Esp32Nrf24l01::activate_features()
+    void RP2040Nrf24l01::activate_features()
     {
         uint8_t activate_cmd[2] = {0x50, 0x73};
-        spi_transaction_t t = {};
-        memset(&t, 0, sizeof(t));
-        t.length = 16;
-        t.tx_buffer = activate_cmd;
-        t.rx_buffer = NULL;
-
+        
         set_csn_pin_low();
-        esp_err_t ret = spi_device_transmit(nrf24l01_spi_, &t);
+        spi_write_blocking(spi_port_, activate_cmd, 2);
         set_csn_pin_high();
-
-        if (ret != ESP_OK)
-            ESP_LOGE("NRF24", "ACTIVATE failed: %s", esp_err_to_name(ret));
+        
     }
 
-    void Esp32Nrf24l01::clear_interrupt_flags()
+    void RP2040Nrf24l01::clear_interrupt_flags()
     {
         write_register(NRF24L01_STATUS,
                        NRF24L01_STATUS_RX_DR | NRF24L01_STATUS_TX_DS | NRF24L01_STATUS_MAX_RT);
     }
 
+
     // Public method
-    void Esp32Nrf24l01::init()
+    void RP2040Nrf24l01::init()
     {
-        esp_err_t ret;
-
         // Configure CE and CSN pin
-        gpio_reset_pin(csn_pin_);
-        gpio_reset_pin(ce_pin_);
-        gpio_set_direction(csn_pin_, GPIO_MODE_OUTPUT);
-        gpio_set_direction(ce_pin_, GPIO_MODE_OUTPUT);
+        gpio_init(csn_pin_);
+        gpio_init(ce_pin_);
+        
+        gpio_set_dir(csn_pin_, GPIO_OUT);
+        gpio_set_dir(ce_pin_, GPIO_OUT);
 
-        gpio_set_level(csn_pin_, 1); // Disconnect default SPI
-        gpio_set_level(ce_pin_, 0);  // Disable TX/RX mode
+        gpio_put(csn_pin_, 1); // Disconnect default SPI
+        gpio_put(ce_pin_, 0);  // Disable TX/RX mode
 
-        // 2. Configure SPI bus
-        spi_bus_config_t spi_bus_config;
-        memset(&spi_bus_config, 0, sizeof(spi_bus_config));
-        spi_bus_config.mosi_io_num = mosi_pin_;
-        spi_bus_config.miso_io_num = miso_pin_;
-        spi_bus_config.sclk_io_num = sck_pin_;
-        spi_bus_config.quadwp_io_num = -1;
-        spi_bus_config.quadhd_io_num = -1;
-
-        ret = spi_bus_initialize(SPI2_HOST, &spi_bus_config, SPI_DMA_CH_AUTO);
-        if (ret != ESP_OK)
-            ESP_LOGE("NRF", "SPI bus init failed: %s", esp_err_to_name(ret));
-
-        // 3. Add SPI device (nRF24L01)
-        spi_device_interface_config_t device_config;
-        memset(&device_config, 0, sizeof(device_config));
-        device_config.mode = 0;
-        device_config.clock_speed_hz = 2 * 1000 * 1000; // 2 MHz
-        device_config.spics_io_num = -1;                // manual control CSN
-        device_config.queue_size = 1;
-
-        ret = spi_bus_add_device(SPI2_HOST, &device_config, &nrf24l01_spi_);
-        if (ret != ESP_OK)
-            ESP_LOGE("NRF", "Add device failed: %s", esp_err_to_name(ret));
+        spi_init(spi_port_, 2 * 1000 * 1000); // // 2 MHz
+        gpio_set_function(sck_pin_, GPIO_FUNC_SPI);
+        gpio_set_function(miso_pin_, GPIO_FUNC_SPI);
+        gpio_set_function(mosi_pin_, GPIO_FUNC_SPI);
 
         activate_features();
-    }
+    }    
 
-    void Esp32Nrf24l01::config_tx_mode(uint8_t *tx_addr, uint8_t payload_len, uint8_t channel)
+    void RP2040Nrf24l01::config_tx_mode(uint8_t *tx_addr, uint8_t payload_len, uint8_t channel)
     {
         set_ce_pin_low();
 
@@ -294,12 +193,12 @@ namespace aircraft_lib
 
         write_register(NRF24L01_FEATURE, 0x01);
 
-        vTaskDelay(pdMS_TO_TICKS(2));
+        sleep_ms(2);
         clear_interrupt_flags();
         flush_tx();
     }
 
-    void Esp32Nrf24l01::config_rx_mode(uint8_t *rx_addr, uint8_t payload_len, uint8_t channel)
+    void RP2040Nrf24l01::config_rx_mode(uint8_t *rx_addr, uint8_t payload_len, uint8_t channel)
     {
         set_ce_pin_low();
 
@@ -327,14 +226,14 @@ namespace aircraft_lib
 
         write_register(NRF24L01_FEATURE, 0x01);
 
-        vTaskDelay(pdMS_TO_TICKS(2));
+        sleep_ms(2);
         clear_interrupt_flags();
         flush_rx();
 
         set_ce_pin_high();
     }
 
-    bool Esp32Nrf24l01::transmit(uint8_t *data, size_t len, uint32_t timeout_ms)
+    bool RP2040Nrf24l01::transmit(uint8_t *data, size_t len, uint32_t timeout_ms)
     {
         clear_interrupt_flags();
 
@@ -346,12 +245,12 @@ namespace aircraft_lib
 
         // 3. Pulse CE >=10µs để gửi
         set_ce_pin_high();
-        esp_rom_delay_us(15); // Gửi 15µs là đủ
+        sleep_us(15); // Gửi 15µs là đủ
         set_ce_pin_low();
 
         // 4. Poll STATUS để kiểm tra kết quả
-        uint32_t start_tick = xTaskGetTickCount();
-        while ((xTaskGetTickCount() - start_tick) < pdMS_TO_TICKS(timeout_ms))
+        uint32_t start = to_ms_since_boot(get_absolute_time());
+        while ((to_ms_since_boot(get_absolute_time()) - start) < timeout_ms)
         {
             uint8_t status = read_register(NRF24L01_STATUS);
             if (status & NRF24L01_STATUS_TX_DS)
@@ -368,14 +267,14 @@ namespace aircraft_lib
                 return false;
             }
 
-            vTaskDelay(pdMS_TO_TICKS(1)); // Nhẹ nhàng CPU
+            sleep_ms(1);
         }
 
         // Hết timeout
         return false;
     }
 
-    bool Esp32Nrf24l01::receive(uint8_t *data, size_t len)
+    bool RP2040Nrf24l01::receive(uint8_t *data, size_t len)
     {
         if (len > 32)
             return false;
@@ -397,7 +296,7 @@ namespace aircraft_lib
         return false;
     }
 
-    void Esp32Nrf24l01::print_register_map()
+    void RP2040Nrf24l01::print_register_map()
     {
         uint8_t tx_addr[5];
         uint8_t rx_addr_0[5];
@@ -436,6 +335,8 @@ namespace aircraft_lib
         uint8_t dynpd = read_register(NRF24L01_DYNPD);
         uint8_t feature = read_register(NRF24L01_FEATURE);
 
+        
+
         printf("CONFIG: 0x%02X\n", config);
         printf("EN_AA: 0x%02X\n", en_aa);
         printf("EN_RXADDR: 0x%02X\n", en_rxaddr);
@@ -464,4 +365,4 @@ namespace aircraft_lib
         printf("RX_ADDR_P4 = %02X %02X %02X %02X %02X\n", rx_addr_4[0], rx_addr_4[1], rx_addr_4[2], rx_addr_4[3], rx_addr_4[4]);
         printf("RX_ADDR_P5 = %02X %02X %02X %02X %02X\n\n", rx_addr_5[0], rx_addr_5[1], rx_addr_5[2], rx_addr_5[3], rx_addr_5[4]);
     }
-}
+} // namespace aircraft_lib
