@@ -12,6 +12,10 @@ import com.example.aircrafttx.view.JoystickView;
 
 import java.io.IOException;
 import java.net.InetAddress;
+import java.net.SocketException;
+import java.net.SocketTimeoutException;
+import java.net.UnknownHostException;
+import java.util.concurrent.ExecutionException;
 
 public class MainActivity extends AppCompatActivity {
     private TcpClient tcpClient;
@@ -83,7 +87,7 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void connectToTcpServer() {
-        String host = "192.168.1.6";
+        String host = "192.168.4.1";
         int port = 2003;
 
         try {
@@ -95,8 +99,17 @@ public class MainActivity extends AppCompatActivity {
                 Toast.makeText(this, new String(bufferReceive), Toast.LENGTH_SHORT).show();
             });
         }
+        catch (UnknownHostException e) {
+            Toast.makeText(this, e.getMessage(), Toast.LENGTH_SHORT).show();
+        }
+        catch (SocketTimeoutException e) {
+            Toast.makeText(this, e.getMessage(), Toast.LENGTH_SHORT).show();
+        }
+        catch (SocketException e) {
+            Toast.makeText(this, e.getMessage(), Toast.LENGTH_SHORT).show();
+        }
         catch (IOException e) {
-            throw new RuntimeException(e);
+            Toast.makeText(this, e.getMessage(), Toast.LENGTH_SHORT).show();
         }
     }
 
