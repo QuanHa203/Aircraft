@@ -7,9 +7,14 @@ import java.net.InetAddress;
 import java.net.InetSocketAddress;
 import java.net.Socket;
 import java.net.SocketException;
+import java.net.SocketTimeoutException;
+import java.nio.channels.IllegalBlockingModeException;
 import java.util.concurrent.BlockingQueue;
+import java.util.concurrent.Callable;
+import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
 import java.util.concurrent.LinkedBlockingQueue;
 
 public class TcpClient {
@@ -34,21 +39,36 @@ public class TcpClient {
         _socket.setTcpNoDelay(on);
     }
 
-    public void connect()  {
-        _executorService.execute(() -> {
-            try {
-                _socket.connect(_inetSocketAddress, 3000);
-                _inputStream = _socket.getInputStream();
-                _outputStream = _socket.getOutputStream();
+    public void connect() throws  IOException, SocketTimeoutException, IllegalBlockingModeException, IllegalArgumentException {
+        Callable<Void> task = () -> {
+            _socket.connect(_inetSocketAddress, 3000);
 
-                sendMessageThread();
-                receiveMessageThread();
-            }
-            catch (IOException e) {
-                throw new RuntimeException(e);
-            }
+            _inputStream = _socket.getInputStream();
+            _outputStream = _socket.getOutputStream();
 
-        });
+            sendMessageThread();
+            receiveMessageThread();
+            return null;
+        };
+
+        Future<?> future = _executorService.submit(task);
+
+        try {
+            future.get();
+        } catch (ExecutionException | InterruptedException e) {
+            Throwable cause = e.getCause();
+
+            if (cause instanceof SocketTimeoutException)
+                throw (SocketTimeoutException) cause;
+            else if (cause instanceof IllegalBlockingModeException)
+                throw (IllegalBlockingModeException) cause;
+            else if (cause instanceof IllegalArgumentException)
+                throw (IllegalArgumentException) cause;
+            else if (cause instanceof IOException)
+                throw (IOException) cause;
+            else
+                throw new IOException("Unknown error during connect", cause);
+        }
     }
 
     public void send(byte[] buffer) {
@@ -62,6 +82,14 @@ public class TcpClient {
 
     public void onMessageReceive(OnMessageReceive onMessageReceive) {
         _onMessageReceive = onMessageReceive;
+    }
+
+    public void closeConnection() {
+        try {
+            _socket.close();
+        } catch (IOException e) {
+            throw new RuntimeException(e);
+        }
     }
 
     private void sendMessageThread() {

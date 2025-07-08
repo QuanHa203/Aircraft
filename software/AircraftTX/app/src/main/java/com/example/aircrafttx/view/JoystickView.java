@@ -55,7 +55,7 @@ public class JoystickView extends View {
     public JoystickView(Context context, AttributeSet attrs) {
         super(context, attrs);
         basePaint.setColor(Color.GRAY);
-        hatPaint.setColor(Color.BLUE);
+        hatPaint.setColor(Color.BLACK);
         basePaint.setAntiAlias(true);
         hatPaint.setAntiAlias(true);
     }

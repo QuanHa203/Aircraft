@@ -33,6 +33,8 @@
             android:hint="User Name"
             android:importantForAutofill="no"
             android:inputType="text"
+            android:minHeight="48dp"
+            android:textColorHint="#546E7A"
             tools:ignore="HardcodedText" />
 
         <EditText
@@ -44,7 +46,9 @@
             android:hint="Password"
             android:importantForAutofill="no"
             android:inputType="text"
-            tools:ignore="HardcodedText" />
+            android:minHeight="48dp"
+            android:textColorHint="#546E7A"
+            tools:ignore="HardcodedText,TextFields" />
 
         <Button
             android:id="@+id/btnLogin"
