@@ -1,8 +1,3 @@
-#include "nrf24l01_interface.h"
-#include "rp2040_nrf24l01.h"
-#include "mx1508.h"
-#include "servo.h"
-
 extern "C"
 {
 #include "pico/stdlib.h"
@@ -11,6 +6,11 @@ extern "C"
 #include "pico/multicore.h"
 #include "hardware/gpio.h"
 }
+
+#include "nrf24l01_interface.h"
+#include "rp2040_nrf24l01.h"
+#include "mx1508.h"
+#include "servo.h"
 
 #define SERVO_LEFT_PIN 28
 #define SERVO_RIGHT_PIN 29
@@ -32,6 +32,8 @@ const uint8_t channel = 110;
 
 bool is_motor_spinning = false;
 uint32_t last_motor_spinning_time_us = 0;
+uint8_t last_roll = 0;
+uint8_t last_pitch = 0;
 
 uint8_t rx_address[5] = {'P', 'L', 'A', 'N', 'E'};
 
@@ -52,7 +54,9 @@ void control_servo();
 
 void handle_control_aircraft_task(void *arg);
 void handle_get_packet_from_aircraft_tx_task(void *arg);
+
 void vApplicationMallocFailedHook(void);
+void vApplicationStackOverflowHook(TaskHandle_t xTask, char *pcTaskName);
 
 extern "C" int main()
 {
@@ -68,36 +72,9 @@ extern "C" int main()
     mx1508.motor_A_stop();
     mx1508.motor_B_stop();
 
-    uint8_t rx_payload[payload_len];
-    while (1)
-    {
-        // if (!is_packet_ready)
-        //     continue;
-
-        if (rf_rx->receive(rx_payload, payload_len))
-        {
-            packet.frame_id = rx_payload[0];
-            packet.throttle = rx_payload[1];
-            packet.yaw = rx_payload[2];
-            packet.pitch = rx_payload[3];
-            packet.roll = rx_payload[4];
-            packet.flags = rx_payload[5];
-            packet.checksum = rx_payload[6];
-            packet.reserved = rx_payload[7];
-
-            is_packet_ready = true;
-            // printf("Receive from tx: \"%u %u %u %u %u %u %u %u\"\n", rx_payload[0], rx_payload[1], rx_payload[2], rx_payload[3], rx_payload[4], rx_payload[5], rx_payload[6], rx_payload[7]);
-        }
-
-        control_motor();
-        control_servo();
-        is_packet_ready = false;
-    }
-    // Run Core 1
-    // multicore_launch_core1(handle_get_packet_from_aircraft_tx_task);
-
-    // xTaskCreate(handle_get_packet_from_aircraft_tx_task, "b", 4096, NULL, 4, NULL);
-    // xTaskCreate(handle_control_aircraft_task, "a", 4096, NULL, 4, NULL);
+    xTaskCreate(handle_get_packet_from_aircraft_tx_task, "task_get_packet", 1024, NULL, 4, NULL);
+    xTaskCreate(handle_control_aircraft_task, "task_control", 1024, NULL, 4, NULL);
+    vTaskStartScheduler();
 }
 
 int clamp(int value, int min, int max)
@@ -118,40 +95,22 @@ uint abs(int num)
 
 void handle_control_aircraft_task(void *arg)
 {
-    uint8_t rx_payload[payload_len];
-
     while (1)
     {
-        sleep_ms(20);
-
-        // if (!is_packet_ready)
-        //     continue;
-
-        if (rf_rx->receive(rx_payload, payload_len))
-        {
-            packet.frame_id = rx_payload[0];
-            packet.throttle = rx_payload[1];
-            packet.yaw = rx_payload[2];
-            packet.pitch = rx_payload[3];
-            packet.roll = rx_payload[4];
-            packet.flags = rx_payload[5];
-            packet.checksum = rx_payload[6];
-            packet.reserved = rx_payload[7];
-
-            is_packet_ready = true;
-            // printf("Receive from tx: \"%u %u %u %u %u %u %u %u\"\n", rx_payload[0], rx_payload[1], rx_payload[2], rx_payload[3], rx_payload[4], rx_payload[5], rx_payload[6], rx_payload[7]);
-        }
+        if (!is_packet_ready)
+            continue;
 
         control_motor();
         control_servo();
         is_packet_ready = false;
+        vTaskDelay(10 / portTICK_PERIOD_MS);
     }
+
 }
 
 void handle_get_packet_from_aircraft_tx_task(void *arg)
 {
     uint8_t rx_payload[payload_len];
-
     while (1)
     {
         if (rf_rx->receive(rx_payload, payload_len))
@@ -168,16 +127,22 @@ void handle_get_packet_from_aircraft_tx_task(void *arg)
             is_packet_ready = true;
             // printf("Receive from tx: \"%u %u %u %u %u %u %u %u\"\n", rx_payload[0], rx_payload[1], rx_payload[2], rx_payload[3], rx_payload[4], rx_payload[5], rx_payload[6], rx_payload[7]);
         }
-        sleep_ms(20);
+        vTaskDelay(20 / portTICK_PERIOD_MS);
     }
 }
 
 void vApplicationMallocFailedHook(void)
 {
+    printf("Malloc failed!\n");
     while (1)
-    {
-        // debug hoặc reset tại đây
-    }
+        ;
+}
+
+void vApplicationStackOverflowHook(TaskHandle_t xTask, char *pcTaskName)
+{
+    printf("Stack overflow in task: %s\n", pcTaskName);
+    while (1)
+        ;
 }
 
 void control_motor()
@@ -185,16 +150,16 @@ void control_motor()
     uint8_t throttle = packet.throttle;
 
     // Stop motor
-    if (throttle <= 20)
+    if (throttle <= 50)
     {
         mx1508.motor_A_stop();
         mx1508.motor_B_stop();
         is_motor_spinning = false;
         return;
     }
-    
+
     // Boot success
-    if (time_us_32() - last_motor_spinning_time_us > 200.000)
+    if (time_us_32() - last_motor_spinning_time_us > 150.000)
     {
         mx1508.motor_A_forward(throttle);
         mx1508.motor_B_forward(throttle);
@@ -213,6 +178,12 @@ void control_motor()
 
 void control_servo()
 {
+    if (last_roll == packet.roll && last_pitch == packet.pitch)
+        return;
+
+    last_roll = packet.roll;
+    last_pitch = packet.pitch;
+
     u_int8_t servo_left_angle;  // 0° - 180°
     u_int8_t servo_right_angle; // 0° - 180°
 
@@ -227,7 +198,7 @@ void control_servo()
 
     servo_left_angle = (uint16_t)(left_mix * 180 + 127) / 255;
     servo_right_angle = (uint16_t)(right_mix * 180 + 127) / 255;
-        
+
     servo_left.set_servo_angle(servo_left_angle);
     servo_right.set_servo_angle(abs(servo_right_angle - 180));
 }
