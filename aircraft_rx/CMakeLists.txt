@@ -11,6 +11,7 @@ project(${ProjectName} C CXX ASM)
 pico_sdk_init()
 
 add_subdirectory(main)
+add_subdirectory(components/esc)
 add_subdirectory(components/freertos_config)
 add_subdirectory(components/mx1508)
 add_subdirectory(components/nrf24l01)

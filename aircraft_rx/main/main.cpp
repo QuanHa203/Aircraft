@@ -1,12 +1,14 @@
 extern "C"
 {
-#include "pico/stdlib.h"
 #include "FreeRTOS.h"
 #include "task.h"
+
+#include "pico/stdlib.h"
 #include "pico/multicore.h"
 #include "hardware/gpio.h"
 }
 
+#include "esc.h"
 #include "nrf24l01_interface.h"
 #include "rp2040_nrf24l01.h"
 #include "mx1508.h"
@@ -27,23 +29,21 @@ extern "C"
 #define MISO_PIN 12
 #define IRQ_PIN 13
 
+#define ESC_PIN 14
+
 const uint8_t payload_len = 8;
 const uint8_t channel = 110;
 
-bool is_motor_spinning = false;
-uint32_t last_motor_spinning_time_us = 0;
-uint8_t last_roll = 0;
-uint8_t last_pitch = 0;
-
 uint8_t rx_address[5] = {'P', 'L', 'A', 'N', 'E'};
 
-nrf24l01_payload_packet packet;
-volatile bool is_packet_ready = false;
+nrf24l01_payload_packet packet[2];
+volatile uint8_t packet_write_index = 0;
+volatile uint8_t packet_read_index = 0;
 
 aircraft_lib::RP2040Nrf24l01 rp2040_rf_rx(spi1, CE_PIN, CSN_PIN, IRQ_PIN, SCK_PIN, MOSI_PIN, MISO_PIN);
 INrf24l01 *rf_rx = &rp2040_rf_rx;
 
-aircraft_lib::MX1508 mx1508(MOTOR_A_IN1_PIN, MOTOR_A_IN2_PIN, MOTOR_B_IN1_PIN, MOTOR_B_IN2_PIN);
+aircraft_lib::ESC esc(ESC_PIN);
 aircraft_lib::Servo servo_left(SERVO_LEFT_PIN);
 aircraft_lib::Servo servo_right(SERVO_RIGHT_PIN);
 
@@ -60,17 +60,18 @@ void vApplicationStackOverflowHook(TaskHandle_t xTask, char *pcTaskName);
 
 extern "C" int main()
 {
-    stdio_uart_init();
-    sleep_ms(2000);
+    stdio_init_all();
+    sleep_ms(1000);
 
     rf_rx->init();
     rf_rx->config_rx_mode(rx_address, payload_len, channel);
+    printf("Init success RF RX!\n");
 
     servo_left.set_servo_angle(90);
     servo_right.set_servo_angle(90);
 
-    mx1508.motor_A_stop();
-    mx1508.motor_B_stop();
+    esc.set_speed(0);
+    sleep_ms(2000);
 
     xTaskCreate(handle_get_packet_from_aircraft_tx_task, "task_get_packet", 1024, NULL, 4, NULL);
     xTaskCreate(handle_control_aircraft_task, "task_control", 1024, NULL, 4, NULL);
@@ -97,15 +98,15 @@ void handle_control_aircraft_task(void *arg)
 {
     while (1)
     {
-        if (!is_packet_ready)
+        if (packet_read_index == packet_write_index)
             continue;
+
+        packet_read_index = packet_write_index;
 
         control_motor();
         control_servo();
-        is_packet_ready = false;
         vTaskDelay(10 / portTICK_PERIOD_MS);
     }
-
 }
 
 void handle_get_packet_from_aircraft_tx_task(void *arg)
@@ -115,17 +116,18 @@ void handle_get_packet_from_aircraft_tx_task(void *arg)
     {
         if (rf_rx->receive(rx_payload, payload_len))
         {
-            packet.frame_id = rx_payload[0];
-            packet.throttle = rx_payload[1];
-            packet.yaw = rx_payload[2];
-            packet.pitch = rx_payload[3];
-            packet.roll = rx_payload[4];
-            packet.flags = rx_payload[5];
-            packet.checksum = rx_payload[6];
-            packet.reserved = rx_payload[7];
+            uint8_t index = packet_write_index ^ 1;
+            packet[index].frame_id = rx_payload[0];
+            packet[index].throttle = rx_payload[1];
+            packet[index].yaw = rx_payload[2];
+            packet[index].pitch = rx_payload[3];
+            packet[index].roll = rx_payload[4];
+            packet[index].flags = rx_payload[5];
+            packet[index].checksum = rx_payload[6];
+            packet[index].reserved = rx_payload[7];
+            packet_write_index = index;
 
-            is_packet_ready = true;
-            // printf("Receive from tx: \"%u %u %u %u %u %u %u %u\"\n", rx_payload[0], rx_payload[1], rx_payload[2], rx_payload[3], rx_payload[4], rx_payload[5], rx_payload[6], rx_payload[7]);
+            printf("Receive from tx: \"%u %u %u %u %u %u %u %u\"\n", rx_payload[0], rx_payload[1], rx_payload[2], rx_payload[3], rx_payload[4], rx_payload[5], rx_payload[6], rx_payload[7]);
         }
         vTaskDelay(20 / portTICK_PERIOD_MS);
     }
@@ -147,48 +149,37 @@ void vApplicationStackOverflowHook(TaskHandle_t xTask, char *pcTaskName)
 
 void control_motor()
 {
-    uint8_t throttle = packet.throttle;
-
-    // Stop motor
-    if (throttle <= 50)
-    {
-        mx1508.motor_A_stop();
-        mx1508.motor_B_stop();
-        is_motor_spinning = false;
+    static uint8_t last_throttle = -1;
+    uint8_t throttle = packet[packet_read_index].throttle;
+    uint8_t speed_percent;
+    if (last_throttle == throttle)
         return;
-    }
 
-    // Boot success
-    if (time_us_32() - last_motor_spinning_time_us > 150.000)
-    {
-        mx1508.motor_A_forward(throttle);
-        mx1508.motor_B_forward(throttle);
-    }
+    last_throttle = throttle;
+    speed_percent = 100 * throttle / 255;
 
-    // Boot (200ms)
-    if (!is_motor_spinning)
-    {
-        mx1508.motor_A_forward(255);
-        mx1508.motor_B_forward(255);
-        last_motor_spinning_time_us = time_us_32();
-        is_motor_spinning = true;
-        return;
-    }
+    esc.set_speed(speed_percent);
 }
 
 void control_servo()
 {
-    if (last_roll == packet.roll && last_pitch == packet.pitch)
+    static uint8_t last_roll = -1;
+    static uint8_t last_pitch = -1;
+
+    uint8_t roll = packet[packet_read_index].roll;
+    uint8_t pitch = packet[packet_read_index].pitch;
+
+    if (last_roll == roll && last_pitch == pitch)
         return;
 
-    last_roll = packet.roll;
-    last_pitch = packet.pitch;
+    last_roll = roll;
+    last_pitch = pitch;
 
     u_int8_t servo_left_angle;  // 0° - 180°
     u_int8_t servo_right_angle; // 0° - 180°
 
-    int16_t roll_offset = (int16_t)packet.roll - 127;
-    int16_t pitch_offset = (int16_t)packet.pitch - 127;
+    int16_t roll_offset = (int16_t)roll - 127;
+    int16_t pitch_offset = (int16_t)pitch - 127;
 
     int16_t left_mix = 127 + pitch_offset + roll_offset;
     int16_t right_mix = 127 + pitch_offset - roll_offset;
